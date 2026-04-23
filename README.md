@@ -27,7 +27,7 @@ https://conservancy.umn.edu/items/e1bb4015-e92a-4295-822c-d21d277ecfbd
 | **Framework** | TensorFlow / Keras |
 | **Web interface** | Flask + vanilla JS + custom CSS |
 | **Training time** | ~40 minutes on CPU (20 epochs) |
-| **Final val loss** | 0.0273 |
+
 
 ---
 
