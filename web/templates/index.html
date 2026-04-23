@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Apple Detector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,wght@0,300;0,700;1,300&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo">
+      <span class="logo-icon">⬡</span>
+      <span class="logo-text">AppleDetect</span>
+    </div>
+    <div class="status-pill {% if model_loaded %}status-live{% else %}status-demo{% endif %}">
+      <span class="status-dot"></span>
+      {% if model_loaded %}Model loaded{% else %}Demo mode{% endif %}
+    </div>
+  </div>
+</header>
+
+<!-- ── Hero ── -->
+<section class="hero">
+  <div class="hero-bg-grid"></div>
+  <div class="hero-content">
+    <h1 class="hero-title">Find every<br /><em>apple</em> in the frame.</h1>
+  </div>
+</section>
+
+<!-- ── Upload ── -->
+<main class="main-grid">
+  <!-- Left: uploader -->
+  <section class="card upload-card" id="uploadSection">
+    <h2 class="card-title">Upload an image</h2>
+    <div class="drop-zone" id="dropZone">
+      <input type="file" id="fileInput" accept="image/*" hidden />
+      <div class="drop-inner" id="dropInner">
+        <div class="drop-icon">↑</div>
+        <p class="drop-label">Drag &amp; drop or <button class="link-btn" onclick="document.getElementById('fileInput').click()">browse</button></p>
+        <p class="drop-hint">JPG, PNG, WEBP — max 16 MB</p>
+      </div>
+      <div class="preview-wrap" id="previewWrap" style="display:none">
+        <img id="previewImg" src="" alt="Preview" />
+        <button class="clear-btn" id="clearBtn">✕ Clear</button>
+      </div>
+    </div>
+
+    <button class="detect-btn" id="detectBtn" disabled>
+      <span class="detect-btn-text">Detect apples</span>
+      <span class="detect-btn-spinner" style="display:none">⟳</span>
+    </button>
+
+    {% if not model_loaded %}
+    <p class="demo-notice">
+      ⚠ No trained weights found — results are <strong>simulated</strong>.
+      Run <code>python train.py</code> to train the model first.
+    </p>
+    {% endif %}
+  </section>
+
+  <!-- Right: results -->
+  <section class="card result-card" id="resultSection">
+    <h2 class="card-title">Detection results</h2>
+    <div class="result-placeholder" id="resultPlaceholder">
+      <p>Results will appear here after detection.</p>
+    </div>
+    <div id="resultContent" style="display:none">
+      <div class="result-image-wrap">
+        <img id="resultImg" src="" alt="Detection result" />
+      </div>
+      <div class="result-stats" id="resultStats"></div>
+      <div class="detections-list" id="detectionsList"></div>
+    </div>
+  </section>
+</main>
+
+<!-- ── Metrics dashboard ── -->
+{% if metrics or history %}
+<section class="metrics-section">
+  <h2 class="section-title">Training dashboard</h2>
+  <div class="metrics-grid">
+
+    {% if metrics.mAP is defined %}
+    <div class="metric-tile">
+      <span class="metric-value">{{ "%.1f"|format(metrics.mAP * 100) }}%</span>
+      <span class="metric-label">mAP @ IoU 0.5</span>
+    </div>
+    {% endif %}
+
+    {% if history %}
+    {% set final_loss = history.get('val_loss', [])[-1] if history.get('val_loss') else None %}
+    {% if final_loss is not none %}
+    <div class="metric-tile">
+      <span class="metric-value">{{ "%.4f"|format(final_loss) }}</span>
+      <span class="metric-label">Final val loss</span>
+    </div>
+    {% endif %}
+    {% set n_epochs = history.get('loss', [])|length %}
+    {% if n_epochs %}
+    <div class="metric-tile">
+      <span class="metric-value">{{ n_epochs }}</span>
+      <span class="metric-label">Epochs trained</span>
+    </div>
+    {% endif %}
+    {% endif %}
+
+  </div>
+
+  {% if history and history.get('loss') %}
+  <div class="chart-wrap">
+    <canvas id="lossChart"></canvas>
+  </div>
+  <script>
+    // Simple vanilla loss curve chart — no external chart lib needed
+    (function() {
+      const trainLoss = {{ history.get('loss', []) | tojson }};
+      const valLoss   = {{ history.get('val_loss', []) | tojson }};
+      const canvas = document.getElementById('lossChart');
+      const ctx    = canvas.getContext('2d');
+      const W = canvas.offsetWidth || 800;
+      const H = 220;
+      canvas.width  = W;
+      canvas.height = H;
+
+      const pad  = { top: 20, right: 20, bottom: 40, left: 55 };
+      const maxV = Math.max(...trainLoss, ...valLoss) * 1.05;
+      const minV = 0;
+
+      function Px(epoch, total) {
+        return pad.left + (epoch / (total - 1)) * (W - pad.left - pad.right);
+      }
+      function Py(v) {
+        return H - pad.bottom - ((v - minV) / (maxV - minV)) * (H - pad.top - pad.bottom);
+      }
+
+      // Grid lines
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.lineWidth   = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + i * (H - pad.top - pad.bottom) / 4;
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+      }
+
+      // Axes labels
+      ctx.fillStyle  = "#8a9bb0";
+      ctx.font       = "11px 'DM Mono', monospace";
+      ctx.textAlign  = "right";
+      for (let i = 0; i <= 4; i++) {
+        const v = maxV - i * maxV / 4;
+        const y = pad.top + i * (H - pad.top - pad.bottom) / 4;
+        ctx.fillText(v.toFixed(3), pad.left - 6, y + 4);
+      }
+      ctx.textAlign = "center";
+      trainLoss.forEach((_, i) => {
+        if (i % Math.ceil(trainLoss.length / 6) === 0 || i === trainLoss.length - 1)
+          ctx.fillText(i + 1, Px(i, trainLoss.length), H - pad.bottom + 16);
+      });
+      ctx.fillText("Epoch", W / 2, H - 4);
+
+      function DrawLine(data, color) {
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = 2;
+        ctx.lineJoin    = "round";
+        data.forEach((v, i) => {
+          const x = Px(i, data.length), y = Py(v);
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        // Dots
+        data.forEach((v, i) => {
+          ctx.beginPath();
+          ctx.arc(Px(i, data.length), Py(v), 3, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+        });
+      }
+
+      DrawLine(trainLoss, "#c8f060");
+      if (valLoss.length) DrawLine(valLoss, "#f07060");
+
+      // Legend
+      ctx.fillStyle = "#c8f060"; ctx.fillRect(pad.left, pad.top - 14, 14, 3);
+      ctx.fillStyle = "#ccc"; ctx.font = "11px 'DM Mono', monospace"; ctx.textAlign = "left";
+      ctx.fillText("train loss", pad.left + 18, pad.top - 10);
+      if (valLoss.length) {
+        ctx.fillStyle = "#f07060"; ctx.fillRect(pad.left + 110, pad.top - 14, 14, 3);
+        ctx.fillStyle = "#ccc";
+        ctx.fillText("val loss", pad.left + 128, pad.top - 10);
+      }
+    })();
+  </script>
+  {% endif %}
+</section>
+{% endif %}
+
+<!-- ── Footer ── -->
+<footer class="site-footer">
+  <span>AppleDetect — MinnEapple × TensorFlow × Flask</span>
+</footer>
+
+<!-- ── JS ── -->
+<script>
+(function () {
+  "use strict";
+
+  const fileInput   = document.getElementById("fileInput");
+  const dropZone    = document.getElementById("dropZone");
+  const dropInner   = document.getElementById("dropInner");
+  const previewWrap = document.getElementById("previewWrap");
+  const previewImg  = document.getElementById("previewImg");
+  const clearBtn    = document.getElementById("clearBtn");
+  const detectBtn   = document.getElementById("detectBtn");
+  const resultPlaceholder = document.getElementById("resultPlaceholder");
+  const resultContent     = document.getElementById("resultContent");
+  const resultImg         = document.getElementById("resultImg");
+  const resultStats       = document.getElementById("resultStats");
+  const detectionsList    = document.getElementById("detectionsList");
+
+  let selectedFile = null;
+
+  // ── File selection helpers ──────────────────────────────────────────────────
+
+  function HandleFile(file) {
+    if (!file || !file.type.startsWith("image/")) return;
+    selectedFile = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      previewImg.src = e.target.result;
+      dropInner.style.display  = "none";
+      previewWrap.style.display = "flex";
+      detectBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function ClearSelection() {
+    selectedFile = null;
+    fileInput.value = "";
+    previewImg.src = "";
+    previewWrap.style.display = "none";
+    dropInner.style.display   = "flex";
+    detectBtn.disabled = true;
+    ShowPlaceholder();
+  }
+
+  function ShowPlaceholder() {
+    resultContent.style.display     = "none";
+    resultPlaceholder.style.display = "block";
+  }
+
+  // ── Events ──────────────────────────────────────────────────────────────────
+
+  fileInput.addEventListener("change", () => HandleFile(fileInput.files[0]));
+  clearBtn.addEventListener("click", ClearSelection);
+
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.classList.add("drag-over");
+  });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("drag-over");
+    HandleFile(e.dataTransfer.files[0]);
+  });
+
+  // ── Detection call ──────────────────────────────────────────────────────────
+
+  detectBtn.addEventListener("click", async () => {
+    if (!selectedFile) return;
+
+    // UI loading state
+    detectBtn.querySelector(".detect-btn-text").textContent = "Detecting…";
+    detectBtn.querySelector(".detect-btn-spinner").style.display = "inline-block";
+    detectBtn.disabled = true;
+
+    const formData = new FormData();
+    formData.append("image", selectedFile);
+
+    try {
+      const response = await fetch("/predict", { method: "POST", body: formData });
+      const data     = await response.json();
+
+      if (!response.ok) throw new Error(data.error || "Server error");
+
+      RenderResult(data);
+    } catch (err) {
+      resultPlaceholder.textContent = "❌ Error: " + err.message;
+    } finally {
+      detectBtn.querySelector(".detect-btn-text").textContent = "Detect apples";
+      detectBtn.querySelector(".detect-btn-spinner").style.display = "none";
+      detectBtn.disabled = false;
+    }
+  });
+
+  function RenderResult(data) {
+    resultImg.src = data.annotated_image;
+    resultPlaceholder.style.display = "none";
+    resultContent.style.display     = "block";
+
+    const modeTag = data.model_loaded ? "" : ' <span class="tag-demo">demo</span>';
+    resultStats.innerHTML = `
+      <div class="stat-badge">
+        <span class="stat-num">${data.count}</span>
+        <span class="stat-lbl">apple${data.count !== 1 ? "s" : ""} detected${modeTag}</span>
+      </div>`;
+
+    if (data.detections.length === 0) {
+      detectionsList.innerHTML = '<p class="no-detections">No apples found above confidence threshold.</p>';
+      return;
+    }
+
+    const rows = data.detections
+      .sort((a, b) => b.score - a.score)
+      .map((d, i) => `
+        <div class="det-row">
+          <span class="det-index">#${String(i + 1).padStart(2, "0")}</span>
+          <span class="det-label">apple</span>
+          <span class="det-score">${(d.score * 100).toFixed(1)}%</span>
+          <span class="det-coords">[${d.x_min}, ${d.y_min}] → [${d.x_max}, ${d.y_max}]</span>
+        </div>`)
+      .join("");
+
+    detectionsList.innerHTML = rows;
+  }
+})();
+</script>
+</body>
+</html>
