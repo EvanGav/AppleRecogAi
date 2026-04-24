@@ -4,7 +4,7 @@ The biggest project on my AI learning Journey ! I wanted to learn how AI works o
 
 A computer vision project that trains a custom anchor-free object detector on the [MinneApple] dataset and exposes it through a Flask web interface. Built from scratch using TensorFlow.
 
-In this readme, I will try to explain what I learned, mistakes I made, limitations I had to deal with and also give you some useful explanations I received from Claude that acted as a teacher throught this project when I was losing all hopes
+In this readme, I will try to explain what I learned, mistakes I made, limitations I had to deal with and also give you some useful explanations I received from Claude that acted as a teacher throughout this project when I was losing all hopes
 
 You can download the dataset here ( I used detection.tar.gz ) : <br>
 https://conservancy.umn.edu/items/e1bb4015-e92a-4295-822c-d21d277ecfbd
